@@ -180,7 +180,14 @@ def scrape_city(client: ApifyClient, search_term: str, location: str, max_result
         "skipClosedPlaces": True,
     }
     run = client.actor("compass/crawler-google-places").call(run_input=run_input)
-    items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+
+    # apify-client versions differ: some return a dict, some return a Run object
+    if isinstance(run, dict):
+        dataset_id = run["defaultDatasetId"]
+    else:
+        dataset_id = getattr(run, "default_dataset_id", None) or getattr(run, "defaultDatasetId", None)
+
+    items = list(client.dataset(dataset_id).iterate_items())
     return items
 
 
