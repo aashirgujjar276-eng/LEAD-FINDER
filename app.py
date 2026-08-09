@@ -252,7 +252,7 @@ def build_excel(leads: list) -> bytes:
     leads_sorted = sorted(leads, key=lambda r: (r["Review Count"], r["Rating"]), reverse=True)
     for r_idx, row in enumerate(leads_sorted, start=2):
         for c_idx, col in enumerate(COLUMNS, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=row[col])
+            cell = ws.cell(row=r_idx, column=c_idx, value=row.get(col, ""))
             cell.font = body_font
 
     last_row = len(leads_sorted) + 1
