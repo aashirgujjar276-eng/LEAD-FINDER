@@ -122,6 +122,12 @@ h1, h2, h3 {
 .st-key-search_btn_wrap .stButton > button[kind="primary"]:hover {
     background: linear-gradient(90deg, #931d17 0%, #c9342b 100%) !important;
 }
+
+/* Widget labels (Country, City, Business type, etc.) in main area */
+[data-testid="stWidgetLabel"] p, [data-testid="stWidgetLabel"] label {
+    color: #ffffff !important;
+    font-weight: 600;
+}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
