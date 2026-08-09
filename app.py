@@ -147,7 +147,7 @@ BUSINESS_PRESETS = [
 ]
 
 COLUMNS = [
-    "City", "Business Name", "Phone", "Website", "Address",
+    "City", "Business Name", "Phone", "Email", "Website", "Address",
     "Rating", "Review Count", "Google Maps URL", "Category", "Status", "Notes",
 ]
 
@@ -166,18 +166,32 @@ def clean_phone(phone: str) -> str:
     return phone
 
 
+def extract_email(item: dict) -> str:
+    # Different actor versions expose this differently; check common shapes
+    emails = item.get("emails")
+    if isinstance(emails, list) and emails:
+        return emails[0]
+    if isinstance(emails, str) and emails:
+        return emails
+    single = item.get("email") or item.get("emailAddress")
+    if single:
+        return single
+    return ""
+
+
 def is_chain(name: str, chain_keywords: list) -> bool:
     name_l = name.lower()
     return any(chain in name_l for chain in chain_keywords)
 
 
-def scrape_city(client: ApifyClient, search_term: str, location: str, max_results: int, progress_cb=None):
+def scrape_city(client: ApifyClient, search_term: str, location: str, max_results: int, find_emails: bool, progress_cb=None):
     run_input = {
         "searchStringsArray": [search_term],
         "locationQuery": location,
         "maxCrawledPlacesPerSearch": max_results,
         "language": "en",
         "skipClosedPlaces": True,
+        "scrapeContacts": find_emails,  # pulls emails/names/job titles from each business's website — costs extra per place
     }
     run = client.actor("compass/crawler-google-places").call(run_input=run_input)
 
@@ -205,6 +219,7 @@ def process_items(items: list, city: str, min_reviews: int, min_rating: float, c
             "City": city,
             "Business Name": name,
             "Phone": clean_phone(item.get("phone", "")),
+            "Email": extract_email(item),
             "Website": item.get("website", ""),
             "Address": item.get("address", ""),
             "Rating": round(rating, 1),
@@ -241,28 +256,28 @@ def build_excel(leads: list) -> bytes:
             cell.font = body_font
 
     last_row = len(leads_sorted) + 1
-    widths = [16, 30, 16, 28, 34, 9, 12, 34, 20, 16, 30]
+    widths = [16, 30, 16, 26, 28, 34, 9, 12, 34, 20, 16, 30]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     if last_row > 1:
         dv = DataValidation(type="list", formula1=status_options, allow_blank=True)
         ws.add_data_validation(dv)
-        dv.add(f"J2:J{last_row}")
+        dv.add(f"K2:K{last_row}")
 
         ws.conditional_formatting.add(
-            f"F2:F{last_row}",
+            f"G2:G{last_row}",
             ColorScaleRule(start_type="min", start_color="F8696B",
                             mid_type="percentile", mid_value=50, mid_color="FFEB84",
                             end_type="max", end_color="63BE7B"),
         )
         ws.conditional_formatting.add(
-            f"J2:J{last_row}",
+            f"K2:K{last_row}",
             CellIsRule(operator="equal", formula=['"Won"'],
                        fill=PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")),
         )
         ws.conditional_formatting.add(
-            f"J2:J{last_row}",
+            f"K2:K{last_row}",
             CellIsRule(operator="equal", formula=['"Lost"'],
                        fill=PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")),
         )
@@ -290,6 +305,11 @@ with st.sidebar:
                                help="console.apify.com → Settings → Integrations")
 
     st.header("Filters")
+    find_emails = st.checkbox(
+        "Find emails (costs extra Apify credits)",
+        value=False,
+        help="Visits each business's website to find an email. Roughly 2-3x the cost per lead compared to phone/address only.",
+    )
     min_reviews = st.slider("Minimum reviews", 0, 200, 25)
     min_rating = st.slider("Minimum rating", 0.0, 5.0, 3.8, 0.1)
     exclude_chains = st.checkbox("Exclude known chains", value=True)
@@ -309,6 +329,11 @@ with col3:
 
 with st.container(key="search_btn_wrap"):
     run_button = st.button("🔍 Find Leads", type="primary", use_container_width=True)
+
+if find_emails:
+    st.caption("📧 Email lookup is ON — this run will cost more Apify credits per lead.")
+else:
+    st.caption("📧 Email lookup is OFF — faster and cheaper, phone/website/address only.")
 
 if "leads" not in st.session_state:
     st.session_state.leads = []
@@ -333,7 +358,7 @@ if run_button:
         for i, (city, location) in enumerate(zip(cities, locations)):
             status.text(f"Scraping {city}...")
             try:
-                items = scrape_city(client, business_type, location, max_results)
+                items = scrape_city(client, business_type, location, max_results, find_emails)
                 chain_list = CHAIN_KEYWORDS_DEFAULT if exclude_chains else []
                 leads = process_items(items, city, min_reviews, min_rating, chain_list)
                 all_leads.extend(leads)
