@@ -86,10 +86,27 @@ h1, h2, h3 {
 /* Cards / containers for inputs */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
 .stSelectbox > div > div {
-    background-color: rgba(255,255,255,0.92) !important;
+    background-color: rgba(255,255,255,0.96) !important;
     border-radius: 8px !important;
     border: 1px solid var(--blue-mid) !important;
+    color: #0a2540 !important;
+    font-weight: 500;
+}
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder {
+    color: #5c7fa6 !important;
+    opacity: 1 !important;
+}
+
+/* Alert / info / warning / success boxes: solid readable background */
+[data-testid="stAlert"] {
+    background-color: rgba(255,255,255,0.95) !important;
+    border-radius: 8px;
+}
+[data-testid="stAlert"] p, [data-testid="stAlert"] div {
+    color: #0a2540 !important;
 }
 
 /* Primary button */
@@ -110,10 +127,6 @@ h1, h2, h3 {
     background: rgba(255,255,255,0.95);
     border-radius: 10px;
     padding: 4px;
-}
-
-[data-testid="stAlert"] {
-    border-radius: 8px;
 }
 
 /* Search button: red, distinct from download button */
