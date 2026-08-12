@@ -487,48 +487,45 @@ with tab_find:
 # ─────────────────────────────────────────────────────────────────────────
 
 with tab_send:
-    leads_with_email = [l for l in st.session_state.leads if l.get("Email")]
+    st.caption("This is fully separate from 'Find Leads' — add businesses manually here, write your own script, and send.")
 
-    if not st.session_state.leads:
-        st.info("No leads yet. Go to the 'Find Leads' tab and run a search first.")
-    elif not leads_with_email:
-        st.warning(
-            f"You have {len(st.session_state.leads)} leads, but none have an email address. "
-            "Go back to 'Find Leads', turn on 'Find emails' in the sidebar, and re-run your search."
+    if "manual_leads_df" not in st.session_state:
+        st.session_state.manual_leads_df = pd.DataFrame(
+            [{"Business Name": "", "Email": "", "Status": "Pending"}] * 5
         )
-    else:
-        st.success(f"{len(leads_with_email)} of {len(st.session_state.leads)} leads have an email address and are ready to contact.")
+    if "manual_email_log" not in st.session_state:
+        st.session_state.manual_email_log = {}  # email -> "sent" | "failed"
 
-        if "email_log" not in st.session_state:
-            st.session_state.email_log = {}  # email -> "sent" | "failed"
+    st.subheader("1. Add your businesses")
+    st.caption("Type or paste directly into the table. Use the + at the bottom to add rows, or right-click to delete.")
 
-        st.subheader("Email template")
-        st.caption("Use {business_name} anywhere you want it personalized per business.")
-        subject_template = st.text_input("Subject line", value=DEFAULT_SUBJECT_TEMPLATE)
-        body_template = st.text_area("Email body", value=DEFAULT_BODY_TEMPLATE, height=280)
+    edited_df = st.data_editor(
+        st.session_state.manual_leads_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Business Name": st.column_config.TextColumn("Business Name", required=True),
+            "Email": st.column_config.TextColumn("Email", required=True),
+            "Status": st.column_config.TextColumn("Status", disabled=True),
+        },
+        key="manual_leads_editor",
+    )
+    st.session_state.manual_leads_df = edited_df
 
-        already_sent_count = sum(1 for l in leads_with_email if st.session_state.email_log.get(l["Email"]) == "sent")
-        not_sent = [l for l in leads_with_email if st.session_state.email_log.get(l["Email"]) != "sent"]
+    st.subheader("2. Write your script")
+    st.caption('Use {business_name} anywhere you want it auto-filled — e.g. "Dear {business_name} team,"')
 
-        st.subheader("Recipients")
-        st.caption(f"{already_sent_count} already sent this session · {len(not_sent)} pending")
+    subject_template = st.text_input("Subject line", value=DEFAULT_SUBJECT_TEMPLATE)
+    body_template = st.text_area("Email body", value=DEFAULT_BODY_TEMPLATE, height=280)
 
-        preview_df = pd.DataFrame([
-            {
-                "Business Name": l["Business Name"],
-                "Email": l["Email"],
-                "City": l.get("City", ""),
-                "Status": st.session_state.email_log.get(l["Email"], "Pending"),
-            }
-            for l in leads_with_email
-        ])
-        st.dataframe(preview_df, use_container_width=True, hide_index=True)
+    valid_rows = edited_df[(edited_df["Business Name"].str.strip() != "") & (edited_df["Email"].str.strip() != "")]
+    valid_leads = valid_rows.to_dict("records")
 
-        daily_limit = st.slider("Max emails to send this run (safety cap)", 1, min(300, len(not_sent)) if not_sent else 1,
-                                 min(90, len(not_sent)) if not_sent else 1)
+    daily_limit = st.slider("Max emails to send this run (safety cap)", 1, 300, 90)
 
-        if not_sent:
-            sample = not_sent[0]
+    if valid_leads:
+        sample = valid_leads[0]
+        try:
             preview_subject = subject_template.format(business_name=sample["Business Name"])
             preview_body = body_template.format(
                 business_name=sample["Business Name"],
@@ -539,24 +536,34 @@ with tab_send:
             )
             with st.expander(f"Preview first email → {sample['Business Name']} ({sample['Email']})"):
                 st.text(f"Subject: {preview_subject}\n\n{preview_body}")
+        except KeyError as e:
+            st.error(f"Your template uses a placeholder I don't recognize: {e}. Supported: {{business_name}}, {{from_name}}, {{business_company}}, {{phone_number}}, {{mailing_address}}")
 
-        with st.container(key="send_btn_wrap"):
-            send_button = st.button("📧 Send Emails", type="primary", use_container_width=True)
+    st.subheader("3. Send")
+    not_sent = [l for l in valid_leads if st.session_state.manual_email_log.get(l["Email"]) != "sent"]
+    already_sent = len(valid_leads) - len(not_sent)
+    st.caption(f"{len(valid_leads)} valid rows · {already_sent} already sent this session · {len(not_sent)} pending")
 
-        if send_button:
-            if not brevo_api_key:
-                st.error("Enter your Brevo API key in the sidebar first.")
-            elif not from_email or not mailing_address.strip():
-                st.error("Sender email and mailing address are required (legal requirement for outreach emails).")
-            elif not not_sent:
-                st.info("Everyone in this list has already been emailed this session.")
-            else:
-                batch = not_sent[:daily_limit]
-                progress = st.progress(0, text="Starting...")
-                status = st.empty()
-                sent_count, fail_count = 0, 0
+    with st.container(key="send_btn_wrap"):
+        send_button = st.button("📧 Send Emails", type="primary", use_container_width=True)
 
-                for i, lead in enumerate(batch):
+    if send_button:
+        if not brevo_api_key:
+            st.error("Enter your Brevo API key in the sidebar first.")
+        elif not from_email or not mailing_address.strip():
+            st.error("Sender email and mailing address are required (legal requirement for outreach emails).")
+        elif not valid_leads:
+            st.error("Add at least one business name + email in the table above.")
+        elif not not_sent:
+            st.info("Everyone in the table has already been emailed this session.")
+        else:
+            batch = not_sent[:daily_limit]
+            progress = st.progress(0, text="Starting...")
+            status = st.empty()
+            sent_count, fail_count = 0, 0
+
+            for i, lead in enumerate(batch):
+                try:
                     subject = subject_template.format(business_name=lead["Business Name"])
                     body = body_template.format(
                         business_name=lead["Business Name"],
@@ -565,23 +572,32 @@ with tab_send:
                         phone_number=phone_number,
                         mailing_address=mailing_address,
                     )
-                    success, error = send_via_brevo(
-                        brevo_api_key, from_name, from_email,
-                        lead["Email"], lead["Business Name"], subject, body,
-                    )
-                    if success:
-                        sent_count += 1
-                        st.session_state.email_log[lead["Email"]] = "sent"
-                        status.text(f"Sent -> {lead['Business Name']} ({lead['Email']})")
-                    else:
-                        fail_count += 1
-                        st.session_state.email_log[lead["Email"]] = "failed"
-                        status.text(f"FAILED -> {lead['Business Name']}: {error}")
+                except KeyError as e:
+                    st.error(f"Template error on {lead['Business Name']}: unrecognized placeholder {e}")
+                    break
 
-                    progress.progress((i + 1) / len(batch))
-                    time.sleep(1)
+                success, error = send_via_brevo(
+                    brevo_api_key, from_name, from_email,
+                    lead["Email"], lead["Business Name"], subject, body,
+                )
+                if success:
+                    sent_count += 1
+                    st.session_state.manual_email_log[lead["Email"]] = "sent"
+                    status.text(f"Sent -> {lead['Business Name']} ({lead['Email']})")
+                else:
+                    fail_count += 1
+                    st.session_state.manual_email_log[lead["Email"]] = "failed"
+                    status.text(f"FAILED -> {lead['Business Name']}: {error}")
 
-                progress.empty()
-                status.empty()
-                st.success(f"Done — Sent: {sent_count} | Failed: {fail_count}")
-                st.rerun()
+                progress.progress((i + 1) / len(batch))
+                time.sleep(1)
+
+            progress.empty()
+            status.empty()
+            st.success(f"Done — Sent: {sent_count} | Failed: {fail_count}")
+
+            for i, row in st.session_state.manual_leads_df.iterrows():
+                email = row["Email"]
+                if email in st.session_state.manual_email_log:
+                    st.session_state.manual_leads_df.at[i, "Status"] = st.session_state.manual_email_log[email]
+            st.rerun()
