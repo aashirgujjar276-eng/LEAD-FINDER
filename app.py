@@ -302,6 +302,30 @@ def send_via_brevo(api_key: str, from_name: str, from_email: str, to_email: str,
         return False, str(e)
 
 
+def send_via_gmail_smtp(smtp_email: str, app_password: str, from_name: str, to_email: str, subject: str, body: str) -> tuple:
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart()
+    msg["From"] = f"{from_name} <{smtp_email}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg["Reply-To"] = smtp_email
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(smtp_email, app_password)
+            server.sendmail(smtp_email, to_email, msg.as_string())
+        return True, ""
+    except smtplib.SMTPAuthenticationError:
+        return False, "Auth failed — check your App Password (not your normal Google password)."
+    except Exception as e:
+        return False, str(e)
+
+
 def build_excel(leads: list) -> bytes:
     wb = Workbook()
     wb.remove(wb.active)
@@ -384,18 +408,36 @@ with st.sidebar:
     exclude_chains = st.checkbox("Exclude known chains", value=True)
     max_results = st.slider("Max results per city", 10, 120, 60)
 
-    st.header("Brevo Connection")
-    try:
-        default_brevo_key = st.secrets["BREVO_API_KEY"]
-    except Exception:
-        default_brevo_key = ""
-    brevo_api_key = st.text_input("Brevo API Key", value=default_brevo_key, type="password",
-                                   help="Brevo → SMTP & API → API Keys")
-    try:
-        default_from_email = st.secrets["FROM_EMAIL"]
-    except Exception:
-        default_from_email = "info@velnexai.com"
-    from_email = st.text_input("Sender email", value=default_from_email)
+    st.header("Email Sending Method")
+    send_method = st.radio("Send via", ["Brevo (API)", "Gmail/Workspace SMTP"], index=0)
+
+    if send_method == "Brevo (API)":
+        try:
+            default_brevo_key = st.secrets["BREVO_API_KEY"]
+        except Exception:
+            default_brevo_key = ""
+        brevo_api_key = st.text_input("Brevo API Key", value=default_brevo_key, type="password",
+                                       help="Brevo → SMTP & API → API Keys")
+        try:
+            default_from_email = st.secrets["FROM_EMAIL"]
+        except Exception:
+            default_from_email = "info@velnexai.com"
+        from_email = st.text_input("Sender email", value=default_from_email)
+        smtp_app_password = ""
+    else:
+        try:
+            default_from_email = st.secrets["FROM_EMAIL"]
+        except Exception:
+            default_from_email = "info@velnexai.com"
+        from_email = st.text_input("Workspace email", value=default_from_email)
+        try:
+            default_smtp_pw = st.secrets["GMAIL_APP_PASSWORD"]
+        except Exception:
+            default_smtp_pw = ""
+        smtp_app_password = st.text_input("App Password", value=default_smtp_pw, type="password",
+                                           help="myaccount.google.com/apppasswords (16-character code)")
+        brevo_api_key = ""
+
     from_name = st.text_input("Sender name", value="Aashir")
     business_company = st.text_input("Company name (shown in email)", value="Velnex AI")
     phone_number = st.text_input("Phone number (shown in email)", value="")
@@ -548,8 +590,10 @@ with tab_send:
         send_button = st.button("📧 Send Emails", type="primary", use_container_width=True)
 
     if send_button:
-        if not brevo_api_key:
+        if send_method == "Brevo (API)" and not brevo_api_key:
             st.error("Enter your Brevo API key in the sidebar first.")
+        elif send_method == "Gmail/Workspace SMTP" and not smtp_app_password:
+            st.error("Enter your Gmail/Workspace App Password in the sidebar first.")
         elif not from_email or not mailing_address.strip():
             st.error("Sender email and mailing address are required (legal requirement for outreach emails).")
         elif not valid_leads:
@@ -576,10 +620,17 @@ with tab_send:
                     st.error(f"Template error on {lead['Business Name']}: unrecognized placeholder {e}")
                     break
 
-                success, error = send_via_brevo(
-                    brevo_api_key, from_name, from_email,
-                    lead["Email"], lead["Business Name"], subject, body,
-                )
+                if send_method == "Brevo (API)":
+                    success, error = send_via_brevo(
+                        brevo_api_key, from_name, from_email,
+                        lead["Email"], lead["Business Name"], subject, body,
+                    )
+                else:
+                    success, error = send_via_gmail_smtp(
+                        from_email, smtp_app_password, from_name,
+                        lead["Email"], subject, body,
+                    )
+
                 if success:
                     sent_count += 1
                     st.session_state.manual_email_log[lead["Email"]] = "sent"
