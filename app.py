@@ -266,6 +266,11 @@ def process_items(items: list, city: str, min_reviews: int, min_rating: float, c
 
 BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 
+# Brevo's 2026 API supports per-recipient pixel-tracking consent.
+# False means opens/clicks are anonymized rather than tied to the recipient.
+# Note: this does NOT guarantee that Brevo will omit the tracking pixel itself.
+BREVO_ANONYMIZE_TRACKING = True
+
 DEFAULT_SUBJECT_TEMPLATE = "Quick question about {business_name}'s phone/booking setup"
 DEFAULT_BODY_TEMPLATE = """Hi {business_name} team,
 
@@ -287,7 +292,11 @@ Don't want future emails like this? Reply "unsubscribe" and we'll remove you imm
 def send_via_brevo(api_key: str, from_name: str, from_email: str, to_email: str, to_name: str, subject: str, body: str) -> tuple:
     payload = {
         "sender": {"name": from_name, "email": from_email},
-        "to": [{"email": to_email, "name": to_name}],
+        "to": [{
+            "email": to_email,
+            "name": to_name,
+            "contactPixelTrackingConsent": False if BREVO_ANONYMIZE_TRACKING else True,
+        }],
         "replyTo": {"email": from_email, "name": from_name},
         "subject": subject,
         "textContent": body,
@@ -418,6 +427,8 @@ with st.sidebar:
             default_brevo_key = ""
         brevo_api_key = st.text_input("Brevo API Key", value=default_brevo_key, type="password",
                                        help="Brevo → SMTP & API → API Keys")
+        if BREVO_ANONYMIZE_TRACKING:
+            st.caption("🔒 Brevo recipient tracking is anonymized for API sends.")
         try:
             default_from_email = st.secrets["FROM_EMAIL"]
         except Exception:
